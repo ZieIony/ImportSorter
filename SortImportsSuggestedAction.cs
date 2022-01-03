@@ -13,16 +13,19 @@ using System.Linq;
 namespace ImportSorter {
     class SortImportsSuggestedAction: ISuggestedAction {
         private readonly List<List<ITextSnapshotLine>> blocks;
-        private readonly List<List<string>> results;
+        private readonly List<List<string>> sortedBlocks;
 
         public SortImportsSuggestedAction(List<List<ITextSnapshotLine>> blocks) {
-            this.blocks = blocks;
-            results = new List<List<string>>();
+            this.blocks = new List<List<ITextSnapshotLine>>();
+            sortedBlocks = new List<List<string>>();
             foreach (var block in blocks) {
-                var result = new List<string>();
-                foreach (var line in block)
-                    result.Add(line.GetText());
-                result.Sort((t1, t2) => {
+                var lines = new List<string>();
+                var sorted = new List<string>();
+                foreach (var line in block) {
+                    lines.Add(line.GetText());
+                    sorted.Add(line.GetText());
+                }
+                sorted.Sort((t1, t2) => {
                     var s1 = t1.Split('.');
                     var s2 = t2.Split('.');
                     for (int i = 0; i < Math.Max(s1.Length, s2.Length); i++) {
@@ -36,7 +39,13 @@ namespace ImportSorter {
                     }
                     return 0;
                 });
-                results.Add(result);
+                for (int i = 0; i < lines.Count; i++) {
+                    if (lines[i] != sorted[i]) {
+                        this.blocks.Add(block);
+                        sortedBlocks.Add(sorted);
+                        break;
+                    }
+                }
             }
         }
 
@@ -45,7 +54,7 @@ namespace ImportSorter {
                 Padding = new Thickness(5)
             };
             textBlock.Inlines.Add(new Run() {
-                Text = string.Join("\n\n", results.Select(result => string.Join("\n", result)))
+                Text = string.Join("\n\n", sortedBlocks.Select(result => string.Join("\n", result)))
             });
             return Task.FromResult<object>(textBlock);
         }
@@ -59,7 +68,10 @@ namespace ImportSorter {
         }
 
         public string DisplayText {
-            get { return string.Format("Sort {0} imports", blocks.Sum((lines) => lines.Count)); }
+            get {
+                int importsToSort = blocks.Sum((lines) => lines.Count);
+                return importsToSort == 0 ? "Imports already sorted" : string.Format("Sort {0} imports", importsToSort);
+            }
         }
 
         public ImageMoniker IconMoniker {
@@ -77,16 +89,18 @@ namespace ImportSorter {
             }
         }
         public bool HasPreview {
-            get { return true; }
+            get { return blocks.Count > 0; }
         }
 
         public void Invoke(CancellationToken cancellationToken) {
+            if (blocks.Count == 0)
+                return;
             ITextEdit edit = blocks[0][0].Snapshot.TextBuffer.CreateEdit();
             for (int i = 0; i < blocks.Count; i++) {
                 var lines = blocks[i];
                 int length = lines[lines.Count - 1].End.Position - lines[0].Start.Position;
                 var span = new Microsoft.VisualStudio.Text.Span(lines[0].Start.Position, length);
-                edit.Replace(span, string.Join("\n", results[i]));
+                edit.Replace(span, string.Join(Environment.NewLine, sortedBlocks[i]));
             }
             edit.Apply();
         }

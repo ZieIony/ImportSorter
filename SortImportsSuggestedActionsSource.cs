@@ -5,10 +5,12 @@ using Microsoft.VisualStudio.Language.Intellisense;
 using Microsoft.VisualStudio.Text;
 using Microsoft.VisualStudio.Text.Editor;
 using System.Threading;
+using System.Text.RegularExpressions;
 
 namespace ImportSorter {
     class SortImportsSuggestedActionsSource: ISuggestedActionsSource {
-        private const string IMPORT = "import ";
+        private const string IMPORT_PATTERN = @"(?<prefix>[ \t]*(?:export )?[ \t]*import[ \t]+)[a-zA-Z0-9\._\:]+?;";
+        private const string PREFIX_GROUP = "prefix";
 
         private readonly ITextView textView;
 
@@ -41,19 +43,25 @@ namespace ImportSorter {
             int lineEnd = end.GetContainingLine().LineNumber;
             if (start == end) {
                 ITextSnapshotLine caretLine = start.GetContainingLine();
-                if (caretLine.GetText().Trim().StartsWith(IMPORT)) {
+                Match match = Regex.Match(caretLine.GetText().Trim(), IMPORT_PATTERN);
+                if (match.Success) {
+                    string matchPrefix = match.Groups[PREFIX_GROUP].Value;
                     var lines = new List<ITextSnapshotLine> {
                         caretLine
                     };
+                    // match lines up
                     for (int i = lineStart - 1; i >= 0; i--) {
                         var line = textView.TextBuffer.CurrentSnapshot.GetLineFromLineNumber(i);
-                        if (!line.GetText().Trim().StartsWith(IMPORT))
+                        Match nextMatch = Regex.Match(line.GetText().Trim(), IMPORT_PATTERN);
+                        if (!nextMatch.Success || nextMatch.Groups[PREFIX_GROUP].Value != matchPrefix)
                             break;
                         lines.Insert(0, line);
                     }
+                    // match lines down
                     for (int i = lineEnd + 1; i < textView.TextViewLines.Count; i++) {
                         var line = textView.TextBuffer.CurrentSnapshot.GetLineFromLineNumber(i);
-                        if (!line.GetText().Trim().StartsWith(IMPORT))
+                        Match nextMatch = Regex.Match(line.GetText().Trim(), IMPORT_PATTERN);
+                        if (!nextMatch.Success || nextMatch.Groups[PREFIX_GROUP].Value != matchPrefix)
                             break;
                         lines.Add(line);
                     }
@@ -65,17 +73,22 @@ namespace ImportSorter {
                 if (lineEnd != endMinus1.GetContainingLine().LineNumber)
                     lineEnd--;
                 var lines = new List<ITextSnapshotLine>();
+                string matchPrefix = null;
                 for (int i = lineStart; i <= lineEnd; i++) {
                     var line = textView.TextBuffer.CurrentSnapshot.GetLineFromLineNumber(i);
-                    if (!line.GetText().Trim().StartsWith(IMPORT)) {
-                        if (lines.Count > 0) {
-                            if (lines.Count > 1)
-                                blocks.Add(lines);
+                    Match nextMatch = Regex.Match(line.GetText().Trim(), IMPORT_PATTERN);
+                    string nextMatchPrefix = nextMatch.Groups[PREFIX_GROUP].Value;
+                    if (nextMatch.Success && (matchPrefix == null || nextMatchPrefix == matchPrefix)) {
+                        matchPrefix = nextMatchPrefix;
+                        lines.Add(line);
+                    } else {
+                        matchPrefix = null;
+                        // sort only blocks larger than one line
+                        if (lines.Count > 1)
+                            blocks.Add(lines);
+                        if (lines.Count > 0)
                             lines = new List<ITextSnapshotLine>();
-                        }
-                        continue;
                     }
-                    lines.Add(line);
                 }
                 if (lines.Count > 1)
                     blocks.Add(lines);
